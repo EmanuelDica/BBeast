@@ -1,0 +1,142 @@
+@page "/"
+@page "/feed"
+@implements IDisposable
+@inject TokenStore Tokens
+@inject PostService Posts
+@inject StatusService Statuses
+
+<div class="page-header">
+    <h1>Feed</h1>
+    @if (Tokens.IsAuthenticated)
+    {
+        <a class="btn" href="/compose">New post</a>
+    }
+</div>
+
+@if (Tokens.IsAuthenticated)
+{
+    <div class="status-composer">
+        <input type="text"
+               @bind="_statusDraft"
+               @bind:event="oninput"
+               @onkeydown="OnStatusKeyDown"
+               placeholder="Share a quick update…" />
+        <button class="btn tiny" @onclick="PostStatusAsync"
+                disabled="@(_postingStatus || string.IsNullOrWhiteSpace(_statusDraft))">
+            @(_postingStatus ? "…" : "Post")
+        </button>
+    </div>
+    <AlertBox Message="@_statusError" Kind="error" />
+}
+else
+{
+    <div class="card">
+        <p>
+            BeautyBeast is an educational social network for the beauty industry.
+            Browse the feed, search artists and treatments, or
+            <a href="/signup">create an account</a> /
+            <a href="/signin">sign in</a> to post and book.
+        </p>
+        <p class="muted">
+            Demo accounts: <code>ana.beauty</code> (artist) and <code>mia.client</code> (client) — password <code>password123</code>.
+        </p>
+    </div>
+}
+
+@if (_feedItems is not null && _feedItems.Count > 0)
+{
+    <div class="feed">
+        @foreach (var item in _feedItems)
+        {
+            @if (item.Post is not null)
+            {
+                <PostCard Item="@item.Post" OnDeleted="OnPostDeleted" />
+            }
+            else if (item.Status is not null)
+            {
+                <StatusCard Item="@item.Status" OnDeleted="OnStatusDeleted" />
+            }
+        }
+    </div>
+}
+
+@code {
+    private record FeedItem(DateTime CreatedAt, Post? Post, StatusItem? Status);
+
+    private List<FeedItem>? _feedItems;
+    private string _statusDraft = "";
+    private string? _statusError;
+    private bool _postingStatus;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Tokens.Changed += OnTokensChanged;
+        await ReloadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await ReloadAsync();
+    }
+
+    private async void OnTokensChanged() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            var statuses = await Statuses.ListAsync(take: 30) ?? new();
+            var posts = await Posts.FeedAsync(take: 50) ?? new();
+
+            _feedItems = statuses
+                .Select(s => new FeedItem(s.CreatedAt, null, s))
+                .Concat(posts.Select(p => new FeedItem(p.CreatedAt, p, null)))
+                .OrderByDescending(x => x.CreatedAt)
+                .ToList();
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            _feedItems = new();
+        }
+    }
+
+    private async Task PostStatusAsync()
+    {
+        _statusError = null;
+        if (string.IsNullOrWhiteSpace(_statusDraft)) return;
+        try
+        {
+            _postingStatus = true;
+            var s = await Statuses.CreateAsync(new CreateStatusRequest(_statusDraft.Trim()));
+            if (s is not null)
+            {
+                _feedItems ??= new();
+                _feedItems.Insert(0, new FeedItem(s.CreatedAt, null, s));
+                _statusDraft = "";
+            }
+        }
+        catch (Exception ex) { _statusError = ex.Message; }
+        finally { _postingStatus = false; }
+    }
+
+    private void OnStatusKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") _ = PostStatusAsync();
+    }
+
+    private void OnPostDeleted(int id)
+    {
+        _feedItems?.RemoveAll(x => x.Post?.Id == id);
+        StateHasChanged();
+    }
+
+    private void OnStatusDeleted(int id)
+    {
+        _feedItems?.RemoveAll(x => x.Status?.Id == id);
+        StateHasChanged();
+    }
+
+    public void Dispose() => Tokens.Changed -= OnTokensChanged;
+}

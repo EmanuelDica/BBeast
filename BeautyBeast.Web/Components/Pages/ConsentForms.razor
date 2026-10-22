@@ -1,0 +1,90 @@
+@page "/consent-forms"
+@page "/me/consent-forms"
+@page "/consent-forms/{Id:int}"
+@inject ConsentService Forms
+@inject TokenStore Tokens
+
+@{
+    var isDetail = Id is not null;
+}
+
+<div class="page-header">
+    <h1>@(isDetail ? "Consent form" : "Consent forms")</h1>
+    @if (!isDetail && Tokens.IsAuthenticated && Tokens.User?.Role == UserRole.Artist)
+    {
+        <a class="btn" href="/me/consent-forms/new">New form</a>
+    }
+</div>
+
+@if (!isDetail)
+{
+    @if (_list is null) { <p class="muted">Loading…</p> }
+    else if (_list.Count == 0) { <div class="empty">No forms yet.</div> }
+    else
+    {
+        <p class="muted">Built-in templates plus your own forms (when signed in as an artist).</p>
+        <div class="list-grid">
+            @foreach (var f in _list)
+            {
+                <div class="card">
+                    <h3>@f.Title</h3>
+                    @if (!string.IsNullOrWhiteSpace(f.Category)) { <span class="tag">@f.Category</span> }
+                    @if (f.OwnerId is null) { <span class="tag brand">Built-in template</span> }
+                    else { <span class="tag">Mine</span> }
+                    <p class="muted" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">@f.Body</p>
+                    <div class="right">
+                        <a class="btn secondary tiny" href="@($"/consent-forms/{f.Id}")">Open</a>
+                        @if (f.OwnerId is not null && Tokens.User?.Id == f.OwnerId)
+                        {
+                            <a class="btn tiny" href="@($"/me/consent-forms/{f.Id}/edit")">Edit</a>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+else
+{
+    @if (_form is null && !_loaded) { <p class="muted">Loading…</p> }
+    else if (_form is null) { <div class="empty">Form not found.</div> }
+    else
+    {
+        <div class="card">
+            <h2>@_form.Title</h2>
+            @if (!string.IsNullOrWhiteSpace(_form.Category)) { <span class="tag">@_form.Category</span> }
+            @if (_form.IsTemplate) { <span class="tag brand">Template</span> }
+            <pre style="white-space:pre-wrap;font-family:inherit;background:var(--surface-2);padding:1em;border-radius:8px;margin-top:1em">@_form.Body</pre>
+            <p class="muted">Tip: copy this text into your client paperwork. You can also create your own from your account.</p>
+            @if (_form.OwnerId is not null && Tokens.User?.Id == _form.OwnerId)
+            {
+                <div class="right">
+                    <a class="btn" href="@($"/me/consent-forms/{_form.Id}/edit")">Edit</a>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private List<ConsentForm>? _list;
+    private ConsentForm? _form;
+    private bool _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _list = null; _form = null; _loaded = false;
+
+        if (Id is int detailId)
+        {
+            try { _form = await Forms.GetAsync(detailId); } catch { }
+            _loaded = true;
+        }
+        else
+        {
+            try { _list = await Forms.ListAsync() ?? new(); } catch { _list = new(); }
+        }
+    }
+}

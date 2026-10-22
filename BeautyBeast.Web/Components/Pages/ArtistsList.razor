@@ -1,0 +1,45 @@
+@page "/artists"
+@inject ProfileService Profiles
+
+<div class="page-header">
+    <h1>Artists</h1>
+    <input type="search" placeholder="Search by name, specialty, location…" @bind="_q" @bind:event="oninput" @onkeyup="OnKey" style="max-width:320px" />
+</div>
+
+@if (_artists is null) { <p class="muted">Loading…</p> }
+else if (_artists.Count == 0) { <div class="empty">No artists found.</div> }
+else
+{
+    <div class="list-grid">
+        @foreach (var a in _artists)
+        {
+            <div class="card">
+                <div class="feed-item-head">
+                    <Avatar Url="@a.AvatarUrl" DisplayName="@a.DisplayName" />
+                    <div>
+                        <div class="name"><a href="/artists/@a.Username">@a.DisplayName</a></div>
+                        <div class="meta">@@@a.Username</div>
+                    </div>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(a.Bio)) { <p class="muted">@a.Bio</p> }
+                <div class="right">
+                    <a class="btn secondary tiny" href="/artists/@a.Username">View profile</a>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private string _q = "";
+    private List<UserSummary>? _artists;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    private async Task OnKey(KeyboardEventArgs e) { if (e.Key == "Enter") await ReloadAsync(); }
+
+    private async Task ReloadAsync()
+    {
+        try { _artists = await Profiles.ListArtistsAsync(string.IsNullOrWhiteSpace(_q) ? null : _q) ?? new(); }
+        catch { _artists = new(); }
+    }
+}

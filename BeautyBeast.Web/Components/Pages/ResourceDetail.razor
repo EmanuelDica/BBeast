@@ -1,0 +1,53 @@
+@page "/resources/{Id:int}"
+@inject ResourceService Resources
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+@if (_r is null && !_loaded) { <p class="muted">Loading…</p> }
+else if (_r is null) { <div class="empty">Resource not found.</div> }
+else
+{
+    <div class="page-header">
+        <h1>@_r.Title</h1>
+        @if (Tokens.IsAuthenticated && Tokens.User?.Id == _r.AuthorId)
+        {
+            <a class="btn secondary" href="@($"/me/resources/{_r.Id}/edit")">Edit</a>
+        }
+    </div>
+    <div class="card">
+        @if (!string.IsNullOrWhiteSpace(_r.Category)) { <span class="tag">@_r.Category</span> }
+        <span class="tag brand">@_r.Kind</span>
+        <div class="muted" style="margin-top:.4em">
+            By <a href="/artists/@_r.AuthorUsername">@_r.AuthorDisplayName</a> · @_r.CreatedAt.ToLocalTime().ToString("d MMM yyyy")
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_r.MediaUrl))
+        {
+            @if (_r.Kind == ResourceKind.Video)
+            {
+                <video class="media-thumb" controls src="@_r.MediaUrl"></video>
+            }
+            else
+            {
+                <img class="media-thumb" src="@_r.MediaUrl" alt="@_r.Title" />
+            }
+        }
+        <div style="white-space:pre-wrap">@_r.Body</div>
+        @if (!string.IsNullOrWhiteSpace(_r.ExternalUrl))
+        {
+            <p><a class="btn secondary" href="@_r.ExternalUrl" target="_blank" rel="noopener">Open external link</a></p>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private Resource? _r;
+    private bool _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try { _r = await Resources.GetAsync(Id); }
+        catch { }
+        finally { _loaded = true; }
+    }
+}

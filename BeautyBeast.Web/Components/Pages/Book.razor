@@ -1,0 +1,167 @@
+@page "/book/{TreatmentId:int}"
+@inject TreatmentService Treatments
+@inject BookingService Bookings
+@inject ScheduleService Schedule
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<div class="page-header"><h1>Book a treatment</h1></div>
+
+@if (!Tokens.IsAuthenticated)
+{
+    <div class="empty">Please <a href="/signin">sign in</a> to book.</div>
+}
+else if (_t is null && !_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_t is null)
+{
+    <div class="empty">Treatment not found.</div>
+}
+else if (Tokens.User?.Id == _t.ArtistId)
+{
+    <div class="empty">You can't book your own treatment.</div>
+}
+else
+{
+    <div class="card" style="max-width:680px">
+        <h3>@_t.Name</h3>
+        <span class="tag">@_t.DurationMinutes min</span>
+        <span class="tag brand">@_t.Price.ToString("C")</span>
+        <p class="muted">With @_t.ArtistDisplayName (@@@_t.ArtistUsername)</p>
+
+        <div class="field">
+            <label>Pick a date</label>
+            <input type="date" @bind="_date" @bind:after="LoadSlotsAsync" min="@DateTime.Now.ToString("yyyy-MM-dd")" />
+        </div>
+
+        @if (_loadingSlots)
+        {
+            <p class="muted">Looking up available times…</p>
+        }
+        else if (_slots is null)
+        {
+            <p class="muted">Pick a date to see available times.</p>
+        }
+        else if (_slots.DayOff)
+        {
+            <div class="alert info">@(_slots.Reason ?? "The artist isn't working that day.")</div>
+        }
+        else if (_slots.Slots.Count == 0)
+        {
+            <div class="alert info">@(_slots.Reason ?? "No times available on that day. Try another date.")</div>
+        }
+        else
+        {
+            <label>Pick a start time</label>
+            <div class="slot-grid">
+                @foreach (var s in _slots.Slots)
+                {
+                    var selected = _selectedSlot?.StartMinutes == s.StartMinutes;
+                    <button type="button"
+                            class="slot-btn @(selected ? "selected" : "")"
+                            @onclick="() => SelectSlot(s)">
+                        @s.Time
+                    </button>
+                }
+            </div>
+            <p class="muted" style="font-size:.85em">All times are local. Each booking lasts @_t.DurationMinutes minutes.</p>
+        }
+
+        <div class="field">
+            <label>Notes (optional)</label>
+            <textarea @bind="_notes" placeholder="Anything the artist should know."></textarea>
+        </div>
+        <AlertBox Message="@_error" Kind="error" />
+        <div class="right">
+            <a class="btn ghost" href="@($"/treatments/{_t.Id}")">Cancel</a>
+            <button class="btn" @onclick="SubmitAsync" disabled="@(_busy || _selectedSlot is null)">
+                @(_busy ? "Booking…" : "Confirm booking")
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int TreatmentId { get; set; }
+    private Treatment? _t;
+    private bool _loaded;
+    private DateTime _date = DateTime.Now.Date.AddDays(1);
+    private SlotsResponse? _slots;
+    private SlotDto? _selectedSlot;
+    private bool _loadingSlots;
+    private string? _notes;
+    private string? _error;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try { _t = await Treatments.GetAsync(TreatmentId); }
+        catch { }
+        finally { _loaded = true; }
+
+        if (_t is not null && Tokens.User?.Id != _t.ArtistId)
+        {
+            await LoadSlotsAsync();
+        }
+    }
+
+    private async Task LoadSlotsAsync()
+    {
+        if (_t is null) return;
+        _loadingSlots = true;
+        _selectedSlot = null;
+        _slots = null;
+        try
+        {
+            _slots = await Schedule.GetSlotsAsync(_t.Id, _date);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loadingSlots = false;
+        }
+    }
+
+    private void SelectSlot(SlotDto s)
+    {
+        _selectedSlot = s;
+        _error = null;
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        if (_t is null || _selectedSlot is null)
+        {
+            _error = "Pick a slot.";
+            return;
+        }
+        try
+        {
+            _busy = true;
+            // Build local DateTime from chosen date + slot, then convert to UTC.
+            var hh = _selectedSlot.StartMinutes / 60;
+            var mm = _selectedSlot.StartMinutes % 60;
+            var local = new DateTime(_date.Year, _date.Month, _date.Day, hh, mm, 0, DateTimeKind.Local);
+            var utc = local.ToUniversalTime();
+            var b = await Bookings.CreateAsync(new CreateBookingRequest(_t.Id, utc, _notes));
+            if (b is not null) Nav.NavigateTo("/me/bookings");
+        }
+        catch (ApiException ex)
+        {
+            _error = string.IsNullOrWhiteSpace(ex.Body) ? "Could not place booking." : ex.Body;
+            // Reload slots in case the slot was just taken by someone else.
+            await LoadSlotsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+}

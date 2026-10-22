@@ -1,0 +1,257 @@
+@page "/me/edit"
+@inject ProfileService Profiles
+@inject TokenStore Tokens
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <h1>Edit your profile</h1>
+</div>
+
+@if (!Tokens.IsAuthenticated || Tokens.User is null)
+{
+    <div class="empty">Please <a href="/signin">sign in</a> first.</div>
+}
+else if (_loading)
+{
+    <p class="muted">Loading…</p>
+}
+else if (Tokens.User.Role == UserRole.Artist)
+{
+    <div class="card" style="max-width:760px">
+        <h3>Basics</h3>
+        <div class="field">
+            <label>Display name</label>
+            <input @bind="_artist.DisplayName" />
+        </div>
+        <div class="field">
+            <label>Bio (one-liner)</label>
+            <input @bind="_artist.Bio" />
+        </div>
+        <MediaUploader Label="Avatar (recommended square)" Url="@_artist.AvatarUrl" UrlChanged="@(u => _artist.AvatarUrl = u)" Accept="image/*" />
+        <MediaUploader Label="Cover image" Url="@_artist.CoverUrl" UrlChanged="@(u => _artist.CoverUrl = u)" Accept="image/*" />
+
+        <h3>Professional details</h3>
+        <div class="field"><label>Headline</label><input @bind="_artist.Headline" placeholder="e.g. Master Aesthetician, London" /></div>
+        <div class="field"><label>Specialty</label><input @bind="_artist.Specialty" /></div>
+        <div class="field"><label>Location</label><input @bind="_artist.Location" /></div>
+        <div class="field"><label>Pronouns</label><input @bind="_artist.Pronouns" /></div>
+        <div class="field"><label>About</label><textarea @bind="_artist.About"></textarea></div>
+        <div class="field"><label>Experience</label><textarea @bind="_artist.Experience"></textarea></div>
+        <div class="field"><label>Education / training</label><textarea @bind="_artist.Education"></textarea></div>
+        <div class="field"><label>Skills (comma-separated)</label><input @bind="_artist.Skills" /></div>
+        <div class="field"><label>Website</label><input @bind="_artist.Website" /></div>
+        <div class="field"><label>Phone</label><input @bind="_artist.Phone" /></div>
+        <div class="field"><label><input type="checkbox" @bind="_artist.AcceptingBookings" /> Accepting bookings</label></div>
+
+        <AlertBox Message="@_error" Kind="error" />
+        <AlertBox Message="@_ok" Kind="success" />
+        <div class="right">
+            <a class="btn ghost" href="@($"/artists/{Tokens.User!.Username}")">Cancel</a>
+            <button class="btn" @onclick="SaveArtistAsync" disabled="@_busy">@(_busy ? "Saving…" : "Save")</button>
+        </div>
+    </div>
+
+    <div class="card" style="max-width:760px">
+        <h3>Achievements</h3>
+        @if (_achievements.Count == 0) { <p class="muted">None yet.</p> }
+        else
+        {
+            @foreach (var a in _achievements)
+            {
+                <div class="card compact">
+                    <strong>@a.Title</strong>
+                    @if (!string.IsNullOrWhiteSpace(a.Issuer)) { <span class="muted"> · @a.Issuer</span> }
+                    @if (a.IssuedOn.HasValue) { <span class="muted"> · @a.IssuedOn.Value.ToString("MMM yyyy")</span> }
+                    <div class="right">
+                        <button class="btn danger tiny" @onclick="() => DeleteAchievementAsync(a.Id)">Delete</button>
+                    </div>
+                </div>
+            }
+        }
+        <hr class="divider" />
+        <h4>Add an achievement</h4>
+        <div class="field"><label>Title</label><input @bind="_newAch.Title" /></div>
+        <div class="field"><label>Issuer</label><input @bind="_newAch.Issuer" /></div>
+        <div class="field"><label>Description</label><textarea @bind="_newAch.Description"></textarea></div>
+        <div class="field"><label>Date</label><input type="date" @bind="_newAch.IssuedOn" /></div>
+        <div class="field"><label>Credential URL</label><input @bind="_newAch.CredentialUrl" /></div>
+        <div class="right">
+            <button class="btn tiny" @onclick="AddAchievementAsync" disabled="@_busy">Add</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card" style="max-width:680px">
+        <h3>Your profile</h3>
+        <div class="field"><label>Display name</label><input @bind="_client.DisplayName" /></div>
+        <div class="field"><label>Bio</label><input @bind="_client.Bio" /></div>
+        <MediaUploader Label="Avatar" Url="@_client.AvatarUrl" UrlChanged="@(u => _client.AvatarUrl = u)" Accept="image/*" />
+        <MediaUploader Label="Cover image" Url="@_client.CoverUrl" UrlChanged="@(u => _client.CoverUrl = u)" Accept="image/*" />
+        <div class="field"><label>Location</label><input @bind="_client.Location" /></div>
+        <div class="field"><label>Pronouns</label><input @bind="_client.Pronouns" /></div>
+        <div class="field"><label>Interests (comma-separated)</label><input @bind="_client.Interests" /></div>
+        <div class="field"><label>About</label><textarea @bind="_client.About"></textarea></div>
+
+        <AlertBox Message="@_error" Kind="error" />
+        <AlertBox Message="@_ok" Kind="success" />
+        <div class="right">
+            <a class="btn ghost" href="@($"/clients/{Tokens.User!.Username}")">Cancel</a>
+            <button class="btn" @onclick="SaveClientAsync" disabled="@_busy">@(_busy ? "Saving…" : "Save")</button>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    private class ArtistForm
+    {
+        public string? DisplayName { get; set; }
+        public string? Bio { get; set; }
+        public string? AvatarUrl { get; set; }
+        public string? CoverUrl { get; set; }
+        public string? Headline { get; set; }
+        public string? Specialty { get; set; }
+        public string? Location { get; set; }
+        public string? Pronouns { get; set; }
+        public string? About { get; set; }
+        public string? Experience { get; set; }
+        public string? Education { get; set; }
+        public string? Skills { get; set; }
+        public string? Website { get; set; }
+        public string? Phone { get; set; }
+        public bool AcceptingBookings { get; set; } = true;
+    }
+    private ArtistForm _artist = new();
+
+    private class ClientForm
+    {
+        public string? DisplayName { get; set; }
+        public string? Bio { get; set; }
+        public string? AvatarUrl { get; set; }
+        public string? CoverUrl { get; set; }
+        public string? Location { get; set; }
+        public string? Pronouns { get; set; }
+        public string? Interests { get; set; }
+        public string? About { get; set; }
+    }
+    private ClientForm _client = new();
+
+    private List<Achievement> _achievements = new();
+
+    private class AchForm
+    {
+        public string Title { get; set; } = "";
+        public string? Issuer { get; set; }
+        public string? Description { get; set; }
+        public DateTime? IssuedOn { get; set; }
+        public string? CredentialUrl { get; set; }
+    }
+    private AchForm _newAch = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Tokens.IsAuthenticated || Tokens.User is null) { _loading = false; return; }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var u = Tokens.User!;
+            if (u.Role == UserRole.Artist)
+            {
+                var p = await Profiles.GetArtistAsync(u.Username);
+                if (p is not null)
+                {
+                    _artist = new ArtistForm
+                    {
+                        DisplayName = p.DisplayName, Bio = p.Bio, AvatarUrl = p.AvatarUrl, CoverUrl = p.CoverUrl,
+                        Headline = p.Headline, Specialty = p.Specialty, Location = p.Location, Pronouns = p.Pronouns,
+                        About = p.About, Experience = p.Experience, Education = p.Education, Skills = p.Skills,
+                        Website = p.Website, Phone = p.Phone, AcceptingBookings = p.AcceptingBookings
+                    };
+                    _achievements = await Profiles.ListAchievementsAsync(p.UserId) ?? new();
+                }
+            }
+            else
+            {
+                var p = await Profiles.GetClientAsync(u.Username);
+                if (p is not null)
+                {
+                    _client = new ClientForm
+                    {
+                        DisplayName = p.DisplayName, Bio = p.Bio, AvatarUrl = p.AvatarUrl, CoverUrl = p.CoverUrl,
+                        Location = p.Location, Pronouns = p.Pronouns, Interests = p.Interests, About = p.About
+                    };
+                }
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveArtistAsync()
+    {
+        _error = _ok = null;
+        try
+        {
+            _busy = true;
+            await Profiles.UpdateArtistAsync(new UpdateArtistProfileRequest(
+                _artist.DisplayName, _artist.Bio, _artist.AvatarUrl, _artist.CoverUrl,
+                _artist.Headline, _artist.Specialty, _artist.Location, _artist.Pronouns,
+                _artist.About, _artist.Experience, _artist.Education, _artist.Skills,
+                _artist.Website, _artist.Phone, _artist.AcceptingBookings));
+            _ok = "Saved.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveClientAsync()
+    {
+        _error = _ok = null;
+        try
+        {
+            _busy = true;
+            await Profiles.UpdateClientAsync(new UpdateClientProfileRequest(
+                _client.DisplayName, _client.Bio, _client.AvatarUrl, _client.CoverUrl,
+                _client.Location, _client.Pronouns, _client.Interests, _client.About));
+            _ok = "Saved.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task AddAchievementAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newAch.Title)) { _error = "Title required."; return; }
+        try
+        {
+            var a = await Profiles.AddAchievementAsync(new CreateAchievementRequest(
+                _newAch.Title.Trim(), _newAch.Issuer, _newAch.Description, _newAch.IssuedOn, _newAch.CredentialUrl));
+            if (a is not null)
+            {
+                _achievements.Insert(0, a);
+                _newAch = new AchForm();
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task DeleteAchievementAsync(int id)
+    {
+        try
+        {
+            await Profiles.DeleteAchievementAsync(id);
+            _achievements.RemoveAll(a => a.Id == id);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

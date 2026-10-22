@@ -1,0 +1,92 @@
+@page "/clients/{username}"
+@inject ProfileService Profiles
+@inject PostService Posts
+@inject StatusService Statuses
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+@inject MessagesService DmService
+
+@if (_profile is null && !_loaded) { <p class="muted">Loading…</p> }
+else if (_profile is null) { <div class="empty">Profile not found.</div> }
+else
+{
+    var p = _profile;
+    <div class="profile-cover" style="@(string.IsNullOrWhiteSpace(p.CoverUrl) ? "" : $"background-image:url('{p.CoverUrl}')")"></div>
+    <div class="profile-head">
+        <Avatar Url="@p.AvatarUrl" DisplayName="@p.DisplayName" Size="lg" />
+        <div>
+            <h1 style="margin-bottom:.1em">@p.DisplayName</h1>
+            <div class="muted">@@@p.Username</div>
+            @if (!string.IsNullOrWhiteSpace(p.Location)) { <div class="muted">@p.Location</div> }
+        </div>
+        <div style="flex:1"></div>
+        @if (Tokens.IsAuthenticated && Tokens.User?.Username == p.Username)
+        {
+            <a class="btn secondary" href="/me/edit">Edit profile</a>
+        }
+        else if (Tokens.IsAuthenticated)
+        {
+            <button class="btn secondary" @onclick="() => StartDmAsync(p.UserId)">Message</button>
+        }
+    </div>
+
+    <div class="card">
+        <h3>About</h3>
+        @if (!string.IsNullOrWhiteSpace(p.About)) { <div style="white-space:pre-wrap">@p.About</div> }
+        else if (!string.IsNullOrWhiteSpace(p.Bio)) { <div>@p.Bio</div> }
+        else { <p class="muted">Not set.</p> }
+        @if (!string.IsNullOrWhiteSpace(p.Interests))
+        {
+            <p><strong>Interests:</strong>
+                @foreach (var i in p.Interests.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                { <span class="tag">@i</span> }
+            </p>
+        }
+    </div>
+
+    <div class="page-header" style="margin-top:1em"><h2>Timeline</h2></div>
+    @if (_statuses is null) { <p class="muted">Loading…</p> }
+    else if (_statuses.Count == 0 && (_posts?.Count ?? 0) == 0) { <div class="empty">Nothing here yet.</div> }
+    else
+    {
+        @foreach (var s in _statuses) { <StatusCard Item="s" /> }
+        @if (_posts is not null)
+        {
+            <div class="feed">
+                @foreach (var post in _posts) { <PostCard Item="post" /> }
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public string Username { get; set; } = "";
+
+    private ClientProfileDto? _profile;
+    private List<StatusItem>? _statuses;
+    private List<Post>? _posts;
+    private bool _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _profile = null;
+        _loaded = false;
+        try
+        {
+            _profile = await Profiles.GetClientAsync(Username);
+            if (_profile is not null)
+            {
+                _statuses = await Statuses.ListAsync(author: Username, take: 30) ?? new();
+                _posts = await Posts.FeedAsync(authorId: _profile.UserId, take: 30) ?? new();
+            }
+        }
+        catch { }
+        finally { _loaded = true; }
+    }
+
+    private async Task StartDmAsync(int otherUserId)
+    {
+        var convo = await DmService.GetOrCreateAsync(otherUserId);
+        if (convo is not null) Nav.NavigateTo($"/messages/{convo.Id}");
+    }
+}

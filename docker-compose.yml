@@ -1,0 +1,62 @@
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── API ─────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: BeautyBeast.Api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy   # wait for Postgres to accept connections
+    ports:
+      - "5200:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Connection string — uses the "db" service name as the host
+      ConnectionStrings__BeautyBeast: >-
+        Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      # JWT — key must be at least 32 bytes; never commit the real value
+      Jwt__Key:      ${JWT_KEY}
+      Jwt__Issuer:   ${JWT_ISSUER:-BeautyBeast.Api}
+      Jwt__Audience: ${JWT_AUDIENCE:-BeautyBeast.Web}
+      # CORS — allow the browser origin for the web frontend
+      Cors__Origins__0: http://localhost:5100
+    volumes:
+      # Persist uploaded files across container restarts
+      - uploads_data:/app/wwwroot/uploads
+
+  # ── Blazor Web ──────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: BeautyBeast.Web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5100:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Server-side calls go over the internal Docker network, not localhost
+      Api__BaseUrl: http://api:8080
+
+volumes:
+  postgres_data:
+  uploads_data:

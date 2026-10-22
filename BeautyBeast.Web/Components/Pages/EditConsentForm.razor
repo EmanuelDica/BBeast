@@ -1,0 +1,87 @@
+@page "/me/consent-forms/new"
+@page "/me/consent-forms/{Id:int}/edit"
+@inject ConsentService Forms
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <h1>@(Id is null ? "New consent form" : "Edit form")</h1>
+</div>
+
+@if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist)
+{
+    <div class="empty">Only artists can manage consent forms.</div>
+}
+else
+{
+    <div class="card" style="max-width:760px">
+        <div class="field"><label>Title</label><input @bind="_edit.Title" /></div>
+        <div class="field"><label>Category</label><input @bind="_edit.Category" /></div>
+        <div class="field"><label><input type="checkbox" @bind="_edit.IsTemplate" /> Mark as a reusable template</label></div>
+        <div class="field"><label>Body</label><textarea @bind="_edit.Body" style="min-height:240px;font-family:monospace"></textarea></div>
+        <AlertBox Message="@_error" Kind="error" />
+        <div class="right">
+            <a class="btn ghost" href="/me/consent-forms">Cancel</a>
+            @if (Id is not null) { <button class="btn danger" @onclick="DeleteAsync" disabled="@_busy">Delete</button> }
+            <button class="btn" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Saving…" : "Save")</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private class EditModel
+    {
+        public string Title { get; set; } = "";
+        public string? Category { get; set; }
+        public string Body { get; set; } = "";
+        public bool IsTemplate { get; set; } = true;
+    }
+    private EditModel _edit = new();
+    private string? _error;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist) return;
+        if (Id is int id)
+        {
+            try
+            {
+                var f = await Forms.GetAsync(id);
+                if (f is not null && f.OwnerId == Tokens.User!.Id)
+                    _edit = new EditModel { Title = f.Title, Category = f.Category, Body = f.Body, IsTemplate = f.IsTemplate };
+            }
+            catch { }
+        }
+        else
+        {
+            _edit = new EditModel();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_edit.Title)) { _error = "Title is required."; return; }
+        if (string.IsNullOrWhiteSpace(_edit.Body)) { _error = "Body is required."; return; }
+        try
+        {
+            _busy = true;
+            var req = new CreateConsentFormRequest(_edit.Title.Trim(), _edit.Category, _edit.Body, _edit.IsTemplate);
+            if (Id is int id) await Forms.UpdateAsync(id, req);
+            else await Forms.CreateAsync(req);
+            Nav.NavigateTo("/me/consent-forms");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Id is not int id) return;
+        try { await Forms.DeleteAsync(id); Nav.NavigateTo("/me/consent-forms"); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

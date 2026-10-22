@@ -1,0 +1,184 @@
+@implements IAsyncDisposable
+@inject NotificationService NotifService
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<div class="notif-bell-wrap">
+    <button class="btn-icon notif-bell @(_open ? "active" : "")"
+            @onclick="ToggleAsync"
+            title="Notifications">
+        🔔
+        @if (_unread > 0)
+        {
+            <span class="notif-badge">@(_unread > 9 ? "9+" : _unread.ToString())</span>
+        }
+    </button>
+
+    @if (_open)
+    {
+        <div class="notif-panel">
+            <div class="notif-panel-head">
+                <strong>Notifications</strong>
+                @if (_unread > 0)
+                {
+                    <button class="btn ghost tiny" @onclick="MarkAllReadAsync">Mark all read</button>
+                }
+            </div>
+            <div class="notif-list">
+                @if (_items is null)
+                {
+                    <p class="muted" style="padding:.8em">Loading…</p>
+                }
+                else if (_items.Count == 0)
+                {
+                    <p class="muted" style="padding:.8em">No notifications yet.</p>
+                }
+                else
+                {
+                    @foreach (var n in _items)
+                    {
+                        var notif = n; // capture for lambda
+                        <button class="notif-item @(notif.IsRead ? "" : "unread")"
+                                @onclick="() => NavigateAsync(notif)">
+                            <div class="notif-text">@Describe(notif)</div>
+                            @if (!string.IsNullOrWhiteSpace(notif.Message))
+                            {
+                                <div class="notif-message">@notif.Message</div>
+                            }
+                            <div class="meta">@notif.CreatedAt.ToLocalTime().ToString("g")</div>
+                        </button>
+                    }
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _open;
+    private int _unread;
+    private List<Notification>? _items;
+    private CancellationTokenSource? _cts;
+    private bool _polling;
+
+    protected override void OnInitialized()
+    {
+        if (Tokens.IsAuthenticated)
+            StartPolling();
+        Tokens.Changed += OnTokensChanged;
+    }
+
+    private void OnTokensChanged()
+    {
+        if (Tokens.IsAuthenticated) StartPolling();
+        else StopPolling();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void StartPolling()
+    {
+        if (_polling) return;
+        _polling = true;
+        _cts = new CancellationTokenSource();
+        _ = PollLoopAsync(_cts.Token);
+    }
+
+    private void StopPolling()
+    {
+        _polling = false;
+        _cts?.Cancel();
+    }
+
+    private async Task PollLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                _unread = await NotifService.UnreadCountAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch { }
+            await Task.Delay(TimeSpan.FromSeconds(30), ct).ContinueWith(_ => { });
+        }
+    }
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (_open)
+        {
+            _items = await NotifService.ListAsync();
+            _unread = _items?.Count(n => !n.IsRead) ?? 0;
+        }
+    }
+
+    private async Task NavigateAsync(Notification n)
+    {
+        // Mark as read if not already
+        if (!n.IsRead)
+        {
+            try { await NotifService.MarkReadAsync(n.Id); } catch { }
+            if (_items is not null)
+            {
+                var idx = _items.IndexOf(n);
+                if (idx >= 0) _items[idx] = n with { IsRead = true };
+            }
+            _unread = Math.Max(0, _unread - 1);
+        }
+
+        _open = false;
+        Nav.NavigateTo(DestinationFor(n));
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        await NotifService.MarkAllReadAsync();
+        if (_items is not null)
+            _items = _items.Select(n => n with { IsRead = true }).ToList();
+        _unread = 0;
+    }
+
+    private static string DestinationFor(Notification n) => n.Kind switch
+    {
+        NotificationKind.PostLiked or
+        NotificationKind.PostCommented    => n.PostId.HasValue ? $"/feed#post-{n.PostId}" : "/feed",
+
+        NotificationKind.StatusLiked or
+        NotificationKind.StatusCommented  => "/feed",
+
+        NotificationKind.BookingRequested or
+        NotificationKind.BookingConfirmed or
+        NotificationKind.BookingCancelled or
+        NotificationKind.BookingReminder  => "/me/bookings",
+
+        NotificationKind.MessageReceived  => "/messages",
+        _                                 => "/feed"
+    };
+
+    private static string Describe(Notification n)
+    {
+        var actor = n.ActorDisplayName ?? n.ActorUsername ?? "Someone";
+        return n.Kind switch
+        {
+            NotificationKind.PostLiked        => $"{actor} liked your post",
+            NotificationKind.PostCommented    => $"{actor} commented on your post",
+            NotificationKind.StatusLiked      => $"{actor} liked your status",
+            NotificationKind.StatusCommented  => $"{actor} commented on your status",
+            NotificationKind.BookingRequested => $"{actor} requested a booking",
+            NotificationKind.BookingConfirmed => $"{actor} confirmed your booking",
+            NotificationKind.BookingCancelled => $"{actor} cancelled a booking",
+            NotificationKind.MessageReceived  => $"{actor} sent you a message",
+            NotificationKind.BookingReminder  => "Reminder: your upcoming booking",
+            _                                 => "New notification"
+        };
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Tokens.Changed -= OnTokensChanged;
+        StopPolling();
+        if (_cts is not null) await _cts.CancelAsync();
+        _cts?.Dispose();
+    }
+}

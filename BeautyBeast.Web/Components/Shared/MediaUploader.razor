@@ -1,0 +1,52 @@
+@inject UploadService Uploads
+
+<div class="card compact">
+    <label>@Label</label>
+    <InputFile OnChange="OnFile" accept="@Accept" />
+    @if (_uploading) { <p class="muted">Uploading…</p> }
+    @if (!string.IsNullOrWhiteSpace(Url))
+    {
+        <div style="margin-top:.5em">
+            <img src="@Url" class="media-thumb" alt="upload preview" style="max-height:160px" />
+            <p class="muted" style="word-break:break-all">@Url</p>
+        </div>
+    }
+    <AlertBox Message="@_error" Kind="error" />
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "Media (optional)";
+    [Parameter] public string? Url { get; set; }
+    [Parameter] public EventCallback<string?> UrlChanged { get; set; }
+    [Parameter] public string Accept { get; set; } = "image/*,video/*";
+
+    private bool _uploading;
+    private string? _error;
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        var file = e.File;
+        if (file is null) return;
+        if (file.Size > 25 * 1024 * 1024)
+        {
+            _error = "File too large (max 25 MB).";
+            return;
+        }
+        try
+        {
+            _uploading = true;
+            using var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024);
+            var url = await Uploads.UploadAsync(stream, file.Name, file.ContentType);
+            await UrlChanged.InvokeAsync(url);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+}

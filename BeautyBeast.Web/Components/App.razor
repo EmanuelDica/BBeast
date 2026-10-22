@@ -1,0 +1,25 @@
+@inject IConfiguration Config
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="icon" href="data:," />
+    <title>BeautyBeast</title>
+    <HeadOutlet @rendermode="InteractiveServerNoPrerender" />
+</head>
+<body>
+    <Routes @rendermode="InteractiveServerNoPrerender" />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>
+
+@code {
+    // Disable pre-rendering: browser-storage interop needs JS, which is unavailable
+    // during pre-render. Pre-render also causes components to initialize twice,
+    // which is awkward for our session-hydration logic.
+    private static readonly Microsoft.AspNetCore.Components.Web.InteractiveServerRenderMode
+        InteractiveServerNoPrerender = new(prerender: false);
+}

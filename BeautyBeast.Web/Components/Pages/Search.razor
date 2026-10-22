@@ -1,0 +1,95 @@
+@page "/search"
+@implements IDisposable
+@inject SearchService SearchSvc
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <h1>Search results@(!string.IsNullOrWhiteSpace(_q) ? $" for \"{_q}\"" : "")</h1>
+</div>
+
+@if (string.IsNullOrWhiteSpace(_q)) { <p class="muted">Use the search bar above to find artists, treatments and library resources.</p> }
+else if (_results is null) { <p class="muted">Searching…</p> }
+else
+{
+    <h2>Artists (@_results.Artists.Count)</h2>
+    @if (_results.Artists.Count == 0) { <p class="muted">None.</p> }
+    else
+    {
+        <div class="list-grid">
+            @foreach (var a in _results.Artists)
+            {
+                <div class="card">
+                    <div class="feed-item-head">
+                        <Avatar Url="@a.AvatarUrl" DisplayName="@a.DisplayName" />
+                        <div>
+                            <div class="name"><a href="/artists/@a.Username">@a.DisplayName</a></div>
+                            <div class="meta">@@@a.Username</div>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(a.Bio)) { <p class="muted">@a.Bio</p> }
+                </div>
+            }
+        </div>
+    }
+
+    <h2 style="margin-top:1em">Treatments (@_results.Treatments.Count)</h2>
+    @if (_results.Treatments.Count == 0) { <p class="muted">None.</p> }
+    else
+    {
+        <div class="list-grid">
+            @foreach (var t in _results.Treatments) { <TreatmentCard Item="t" /> }
+        </div>
+    }
+
+    <h2 style="margin-top:1em">Library (@_results.Resources.Count)</h2>
+    @if (_results.Resources.Count == 0) { <p class="muted">None.</p> }
+    else
+    {
+        <div class="list-grid">
+            @foreach (var r in _results.Resources)
+            {
+                <div class="card">
+                    <h3><a href="@($"/resources/{r.Id}")">@r.Title</a></h3>
+                    @if (!string.IsNullOrWhiteSpace(r.Category)) { <span class="tag">@r.Category</span> }
+                    <p class="muted" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">@r.Body</p>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private string _q = "";
+    private SearchResults? _results;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        await RunSearchFromUriAsync();
+    }
+
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        await RunSearchFromUriAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RunSearchFromUriAsync()
+    {
+        var uri = new Uri(Nav.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+        _q = query.TryGetValue("q", out var v) ? v.ToString() : "";
+        if (!string.IsNullOrWhiteSpace(_q))
+        {
+            _results = null;
+            try { _results = await SearchSvc.SearchAsync(_q); }
+            catch { _results = new SearchResults(Array.Empty<UserSummary>(), Array.Empty<Treatment>(), Array.Empty<Resource>()); }
+        }
+        else
+        {
+            _results = null;
+        }
+    }
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+}

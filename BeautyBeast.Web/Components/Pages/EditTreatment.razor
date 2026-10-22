@@ -1,0 +1,106 @@
+@page "/me/treatments/new"
+@page "/me/treatments/{Id:int}/edit"
+@inject TreatmentService Treatments
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <h1>@(Id is null ? "Add treatment" : "Edit treatment")</h1>
+</div>
+
+@if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist)
+{
+    <div class="empty">Only artists can manage treatments. <a href="/signin">Sign in</a>.</div>
+}
+else
+{
+    <div class="card" style="max-width:680px">
+        <div class="field"><label>Name</label><input @bind="_form.Name" /></div>
+        <div class="field"><label>Category</label><input @bind="_form.Category" placeholder="e.g. Skin, Brows, Lashes" /></div>
+        <div class="field"><label>Description</label><textarea @bind="_form.Description"></textarea></div>
+        <div class="row">
+            <div class="field"><label>Price</label><input type="number" step="0.01" @bind="_form.Price" /></div>
+            <div class="field"><label>Duration (min)</label><input type="number" @bind="_form.DurationMinutes" /></div>
+        </div>
+        <MediaUploader Label="Image" Url="@_form.ImageUrl" UrlChanged="@(u => _form.ImageUrl = u)" Accept="image/*" />
+        <div class="field"><label><input type="checkbox" @bind="_form.IsActive" /> Active (visible to clients)</label></div>
+        <AlertBox Message="@_error" Kind="error" />
+        <div class="right">
+            <a class="btn ghost" href="/me/treatments">Cancel</a>
+            @if (Id is not null)
+            {
+                <button class="btn danger" @onclick="DeleteAsync" disabled="@_busy">Delete</button>
+            }
+            <button class="btn" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Saving…" : "Save")</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private class FormModel
+    {
+        public string Name { get; set; } = "";
+        public string? Category { get; set; }
+        public string? Description { get; set; }
+        public decimal Price { get; set; }
+        public int DurationMinutes { get; set; } = 60;
+        public string? ImageUrl { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
+    private FormModel _form = new();
+    private string? _error;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist) return;
+        if (Id is int id)
+        {
+            try
+            {
+                var t = await Treatments.GetAsync(id);
+                if (t is not null && t.ArtistId == Tokens.User!.Id)
+                {
+                    _form = new FormModel
+                    {
+                        Name = t.Name, Category = t.Category, Description = t.Description,
+                        Price = t.Price, DurationMinutes = t.DurationMinutes,
+                        ImageUrl = t.ImageUrl, IsActive = t.IsActive
+                    };
+                }
+            }
+            catch (Exception ex) { _error = ex.Message; }
+        }
+        else
+        {
+            _form = new FormModel();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_form.Name)) { _error = "Name is required."; return; }
+        if (_form.DurationMinutes < 5) { _error = "Duration must be at least 5 minutes."; return; }
+        try
+        {
+            _busy = true;
+            var req = new CreateTreatmentRequest(_form.Name.Trim(), _form.Category, _form.Description,
+                _form.Price, _form.DurationMinutes, _form.ImageUrl, _form.IsActive);
+            if (Id is int id) await Treatments.UpdateAsync(id, req);
+            else await Treatments.CreateAsync(req);
+            Nav.NavigateTo("/me/treatments");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Id is not int id) return;
+        try { await Treatments.DeleteAsync(id); Nav.NavigateTo("/me/treatments"); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

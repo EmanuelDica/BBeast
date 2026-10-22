@@ -1,0 +1,230 @@
+@page "/messages"
+@page "/messages/{ConversationId:int}"
+@implements IAsyncDisposable
+@inject MessagesService DmService
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <h1>Messages</h1>
+</div>
+
+<div class="dm-shell">
+
+    @* ── Left: conversation list ── *@
+    <div class="dm-sidebar">
+        @if (_conversations is null)
+        {
+            <p class="muted" style="padding:1em">Loading…</p>
+        }
+        else if (_conversations.Count == 0)
+        {
+            <p class="muted" style="padding:1em">No conversations yet.<br />Visit an artist or client profile to start one.</p>
+        }
+        else
+        {
+            @foreach (var c in _conversations)
+            {
+                var convo = c;
+                <button class="dm-convo-item @(ConversationId == convo.Id ? "active" : "")"
+                        @onclick="() => SelectConversation(convo.Id)">
+                    <Avatar Url="@convo.OtherAvatarUrl" DisplayName="@convo.OtherDisplayName" Size="sm" />
+                    <div class="dm-convo-info">
+                        <div class="dm-convo-name">
+                            @convo.OtherDisplayName
+                            @if (convo.UnreadCount > 0)
+                            {
+                                <span class="notif-badge" style="position:static;margin-left:.4em">@convo.UnreadCount</span>
+                            }
+                        </div>
+                        @if (convo.LastMessagePreview is not null)
+                        {
+                            <div class="dm-convo-preview">@convo.LastMessagePreview</div>
+                        }
+                    </div>
+                </button>
+            }
+        }
+    </div>
+
+    @* ── Right: message thread ── *@
+    <div class="dm-thread">
+        @if (ConversationId is null)
+        {
+            <div class="dm-empty">
+                <p class="muted">Select a conversation to start messaging.</p>
+            </div>
+        }
+        else if (_activeConvo is null)
+        {
+            <p class="muted" style="padding:1em">Loading…</p>
+        }
+        else
+        {
+            <div class="dm-thread-header">
+                <Avatar Url="@_activeConvo.OtherAvatarUrl" DisplayName="@_activeConvo.OtherDisplayName" Size="sm" />
+                <strong>@_activeConvo.OtherDisplayName</strong>
+            </div>
+
+            <div class="dm-messages" @ref="_messagesEnd">
+                @if (_messages is null)
+                {
+                    <p class="muted" style="padding:1em">Loading…</p>
+                }
+                else
+                {
+                    @foreach (var m in _messages)
+                    {
+                        var mine = m.SenderId == Tokens.User?.Id;
+                        <div class="dm-msg @(mine ? "mine" : "theirs")">
+                            <div class="dm-bubble">@m.Text</div>
+                            <div class="dm-time">@m.CreatedAt.ToLocalTime().ToString("g")</div>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="dm-composer">
+                <textarea @bind="_draft"
+                          @bind:event="oninput"
+                          @onkeydown="OnKeyDown"
+                          placeholder="Write a message… (Enter to send, Shift+Enter for new line)"
+                          rows="2"
+                          disabled="@_sending"></textarea>
+                <button class="btn" @onclick="SendAsync"
+                        disabled="@(_sending || string.IsNullOrWhiteSpace(_draft))">
+                    Send
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? ConversationId { get; set; }
+
+    private List<ConversationItem>? _conversations;
+    private ConversationItem? _activeConvo;
+    private List<DirectMessageItem>? _messages;
+    private string _draft = "";
+    private bool _sending;
+    private ElementReference _messagesEnd;
+    private CancellationTokenSource? _pollCts;
+    private int _lastMessageId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Tokens.IsAuthenticated) { Nav.NavigateTo("/signin"); return; }
+        _conversations = await DmService.ListConversationsAsync() ?? new();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Stop any existing poll for the previous thread.
+        await StopPollingAsync();
+
+        if (ConversationId is not null)
+        {
+            _activeConvo = _conversations?.FirstOrDefault(c => c.Id == ConversationId.Value);
+            _messages = null;
+            _messages = await DmService.GetMessagesAsync(ConversationId.Value) ?? new();
+            _lastMessageId = _messages.Count > 0 ? _messages[^1].Id : 0;
+
+            // Mark as read and update sidebar badge.
+            await DmService.MarkReadAsync(ConversationId.Value);
+            if (_activeConvo is not null && _activeConvo.UnreadCount > 0)
+                UpdateConvoUnread(ConversationId.Value, 0);
+
+            StartPolling();
+        }
+        else
+        {
+            _activeConvo = null;
+            _messages = null;
+        }
+    }
+
+    private void SelectConversation(int id)
+    {
+        Nav.NavigateTo($"/messages/{id}");
+    }
+
+    private void StartPolling()
+    {
+        _pollCts = new CancellationTokenSource();
+        _ = PollLoopAsync(_pollCts.Token);
+    }
+
+    private async Task StopPollingAsync()
+    {
+        if (_pollCts is not null)
+        {
+            await _pollCts.CancelAsync();
+            _pollCts.Dispose();
+            _pollCts = null;
+        }
+    }
+
+    private async Task PollLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await Task.Delay(4000, ct).ContinueWith(_ => { });
+            if (ct.IsCancellationRequested || ConversationId is null) break;
+
+            try
+            {
+                // Only fetch messages newer than the last one we have.
+                var fresh = await DmService.GetMessagesAsync(ConversationId.Value) ?? new();
+                var newOnes = fresh.Where(m => m.Id > _lastMessageId).ToList();
+                if (newOnes.Count > 0)
+                {
+                    _messages ??= new();
+                    _messages.AddRange(newOnes);
+                    _lastMessageId = newOnes[^1].Id;
+                    await DmService.MarkReadAsync(ConversationId.Value);
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch { }
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_draft) || ConversationId is null) return;
+        _sending = true;
+        try
+        {
+            var msg = await DmService.SendAsync(ConversationId.Value, new SendMessageRequest(_draft.Trim()));
+            if (msg is not null)
+            {
+                _messages ??= new();
+                _messages.Add(msg);
+                _lastMessageId = msg.Id;
+                _draft = "";
+
+                // Refresh sidebar preview.
+                _conversations = await DmService.ListConversationsAsync() ?? _conversations ?? new();
+            }
+        }
+        catch { }
+        finally { _sending = false; }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await SendAsync();
+    }
+
+    private void UpdateConvoUnread(int id, int count)
+    {
+        if (_conversations is null) return;
+        var idx = _conversations.FindIndex(c => c.Id == id);
+        if (idx >= 0)
+            _conversations[idx] = _conversations[idx] with { UnreadCount = count };
+    }
+
+    public async ValueTask DisposeAsync() => await StopPollingAsync();
+}

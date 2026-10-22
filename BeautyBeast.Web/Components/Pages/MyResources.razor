@@ -1,0 +1,50 @@
+@page "/me/resources"
+@inject ResourceService Resources
+@inject TokenStore Tokens
+
+<div class="page-header">
+    <h1>My resources</h1>
+    <a class="btn" href="/me/resources/new">New resource</a>
+</div>
+
+@if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist)
+{
+    <div class="empty">Only artists can publish to the library.</div>
+}
+else if (_list is null)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_list.Count == 0)
+{
+    <div class="empty">No resources yet. <a href="/me/resources/new">Add one</a>.</div>
+}
+else
+{
+    <div class="list-grid">
+        @foreach (var r in _list)
+        {
+            <div class="card">
+                <h3><a href="@($"/resources/{r.Id}")">@r.Title</a></h3>
+                @if (!string.IsNullOrWhiteSpace(r.Category)) { <span class="tag">@r.Category</span> }
+                <span class="tag brand">@r.Kind</span>
+                <p class="muted" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">@r.Body</p>
+                <div class="right">
+                    <a class="btn secondary tiny" href="@($"/resources/{r.Id}")">View</a>
+                    <a class="btn tiny" href="@($"/me/resources/{r.Id}/edit")">Edit</a>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<Resource>? _list;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist) return;
+        try { _list = await Resources.ListAsync(authorId: Tokens.User!.Id) ?? new(); }
+        catch { _list = new(); }
+    }
+}

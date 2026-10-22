@@ -1,0 +1,99 @@
+@page "/me/resources/new"
+@page "/me/resources/{Id:int}/edit"
+@inject ResourceService Resources
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <h1>@(Id is null ? "New resource" : "Edit resource")</h1>
+</div>
+
+@if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist)
+{
+    <div class="empty">Only artists can publish to the library.</div>
+}
+else
+{
+    <div class="card" style="max-width:760px">
+        <div class="field"><label>Title</label><input @bind="_form.Title" /></div>
+        <div class="field"><label>Category</label><input @bind="_form.Category" placeholder="e.g. Skin Safety" /></div>
+        <div class="field">
+            <label>Kind</label>
+            <select @bind="_form.Kind">
+                <option value="@ResourceKind.Article">Article</option>
+                <option value="@ResourceKind.Video">Video</option>
+                <option value="@ResourceKind.Document">Document</option>
+                <option value="@ResourceKind.Link">Link</option>
+            </select>
+        </div>
+        <div class="field"><label>Body</label><textarea @bind="_form.Body" style="min-height:160px"></textarea></div>
+        <MediaUploader Label="Media" Url="@_form.MediaUrl" UrlChanged="@(u => _form.MediaUrl = u)" />
+        <div class="field"><label>External URL (optional)</label><input @bind="_form.ExternalUrl" /></div>
+        <AlertBox Message="@_error" Kind="error" />
+        <div class="right">
+            <a class="btn ghost" href="/me/resources">Cancel</a>
+            @if (Id is not null) { <button class="btn danger" @onclick="DeleteAsync" disabled="@_busy">Delete</button> }
+            <button class="btn" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Saving…" : "Save")</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private class FormModel
+    {
+        public string Title { get; set; } = "";
+        public string? Category { get; set; }
+        public string Body { get; set; } = "";
+        public string? MediaUrl { get; set; }
+        public string? ExternalUrl { get; set; }
+        public ResourceKind Kind { get; set; } = ResourceKind.Article;
+    }
+    private FormModel _form = new();
+    private string? _error;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist) return;
+        if (Id is int id)
+        {
+            try
+            {
+                var r = await Resources.GetAsync(id);
+                if (r is not null && r.AuthorId == Tokens.User!.Id)
+                    _form = new FormModel { Title = r.Title, Category = r.Category, Body = r.Body, MediaUrl = r.MediaUrl, ExternalUrl = r.ExternalUrl, Kind = r.Kind };
+            }
+            catch (Exception ex) { _error = ex.Message; }
+        }
+        else
+        {
+            _form = new FormModel();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_form.Title)) { _error = "Title is required."; return; }
+        if (string.IsNullOrWhiteSpace(_form.Body)) { _error = "Body is required."; return; }
+        try
+        {
+            _busy = true;
+            var req = new CreateResourceRequest(_form.Title.Trim(), _form.Category, _form.Body.Trim(), _form.MediaUrl, _form.ExternalUrl, _form.Kind);
+            if (Id is int id) await Resources.UpdateAsync(id, req);
+            else await Resources.CreateAsync(req);
+            Nav.NavigateTo("/me/resources");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Id is not int id) return;
+        try { await Resources.DeleteAsync(id); Nav.NavigateTo("/me/resources"); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

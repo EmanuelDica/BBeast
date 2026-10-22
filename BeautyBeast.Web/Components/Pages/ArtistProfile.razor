@@ -1,0 +1,181 @@
+@page "/artists/{username}"
+@inject ProfileService Profiles
+@inject PostService Posts
+@inject StatusService Statuses
+@inject TreatmentService Treatments
+@inject ReviewService Reviews
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+@inject MessagesService DmService
+
+@if (_profile is null && !_loaded) { <p class="muted">Loading…</p> }
+else if (_profile is null) { <div class="empty">Artist not found.</div> }
+else
+{
+    var p = _profile;
+    <div class="profile-cover" style="@(string.IsNullOrWhiteSpace(p.CoverUrl) ? "" : $"background-image:url('{p.CoverUrl}')")"></div>
+    <div class="profile-head">
+        <Avatar Url="@p.AvatarUrl" DisplayName="@p.DisplayName" Size="lg" />
+        <div>
+            <h1 style="margin-bottom:.1em">@p.DisplayName</h1>
+            <div class="muted">@@@p.Username · <span class="tag brand">Artist</span></div>
+            @if (!string.IsNullOrWhiteSpace(p.Headline)) { <div>@p.Headline</div> }
+            @if (!string.IsNullOrWhiteSpace(p.Location)) { <div class="muted">@p.Location</div> }
+            <StarRating Value="@((int)Math.Round(p.AverageRating))" />
+            <span class="muted">@p.AverageRating.ToString("0.0") (@p.ReviewCount reviews)</span>
+        </div>
+        <div style="flex:1"></div>
+        @if (Tokens.IsAuthenticated && Tokens.User?.Username == p.Username)
+        {
+            <a class="btn secondary" href="/me/edit">Edit profile</a>
+        }
+    </div>
+
+    <div class="row">
+        <div class="card" style="flex: 2 1 320px">
+            <h3>About</h3>
+            @if (!string.IsNullOrWhiteSpace(p.About)) { <div style="white-space:pre-wrap">@p.About</div> } else { <p class="muted">Not set.</p> }
+            @if (!string.IsNullOrWhiteSpace(p.Specialty)) { <p><strong>Specialty:</strong> @p.Specialty</p> }
+            @if (!string.IsNullOrWhiteSpace(p.Skills))
+            {
+                <p><strong>Skills:</strong>
+                    @foreach (var skill in p.Skills.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    { <span class="tag">@skill</span> }
+                </p>
+            }
+            @if (!string.IsNullOrWhiteSpace(p.Experience)) { <h4>Experience</h4><div style="white-space:pre-wrap">@p.Experience</div> }
+            @if (!string.IsNullOrWhiteSpace(p.Education)) { <h4>Education</h4><div style="white-space:pre-wrap">@p.Education</div> }
+        </div>
+
+        <div class="card" style="flex: 1 1 240px">
+            <h3>Contact</h3>
+            @if (!string.IsNullOrWhiteSpace(p.Website)) { <p>🌐 <a href="@p.Website" target="_blank" rel="noopener">@p.Website</a></p> }
+            @if (!string.IsNullOrWhiteSpace(p.Phone)) { <p>📞 @p.Phone</p> }
+            <p>@(p.AcceptingBookings ? "Accepting bookings ✅" : "Not accepting bookings right now")</p>
+            @if (Tokens.IsAuthenticated && Tokens.User?.Id != p.UserId)
+            {
+                @if (p.AcceptingBookings)
+                {
+                    <a class="btn" href="/treatments?artistId=@p.UserId">Book a treatment</a>
+                }
+                <button class="btn secondary" @onclick="() => StartDmAsync(p.UserId)">Message</button>
+            }
+        </div>
+    </div>
+
+    <div class="page-header" style="margin-top:1em">
+        <h2>Achievements</h2>
+    </div>
+    @if (_achievements is null) { <p class="muted">Loading…</p> }
+    else if (_achievements.Count == 0) { <div class="empty">No achievements listed.</div> }
+    else
+    {
+        <div class="list-grid">
+            @foreach (var a in _achievements)
+            {
+                <div class="card compact">
+                    <strong>@a.Title</strong>
+                    @if (!string.IsNullOrWhiteSpace(a.Issuer)) { <div class="muted">@a.Issuer</div> }
+                    @if (a.IssuedOn.HasValue) { <div class="muted">@a.IssuedOn.Value.ToString("MMM yyyy")</div> }
+                    @if (!string.IsNullOrWhiteSpace(a.Description)) { <p>@a.Description</p> }
+                    @if (!string.IsNullOrWhiteSpace(a.CredentialUrl)) { <a class="btn ghost tiny" href="@a.CredentialUrl" target="_blank" rel="noopener">View credential</a> }
+                </div>
+            }
+        </div>
+    }
+
+    <div class="page-header" style="margin-top:1em">
+        <h2>Treatments offered</h2>
+    </div>
+    @if (_treatments is null) { <p class="muted">Loading…</p> }
+    else if (_treatments.Count == 0) { <div class="empty">No treatments listed yet.</div> }
+    else
+    {
+        <div class="list-grid">
+            @foreach (var t in _treatments) { <TreatmentCard Item="t" /> }
+        </div>
+    }
+
+    <div class="page-header" style="margin-top:1em">
+        <h2>Reviews</h2>
+    </div>
+    @if (_reviews is null) { <p class="muted">Loading…</p> }
+    else if (_reviews.Count == 0) { <div class="empty">No reviews yet.</div> }
+    else
+    {
+        @foreach (var r in _reviews)
+        {
+            <div class="card compact">
+                <div class="feed-item-head">
+                    <Avatar Url="@r.ClientAvatarUrl" DisplayName="@r.ClientDisplayName" Size="sm" />
+                    <div>
+                        <div class="name">@r.ClientDisplayName</div>
+                        <div class="meta">@r.CreatedAt.ToLocalTime().ToString("d")</div>
+                    </div>
+                </div>
+                <StarRating Value="@r.Rating" />
+                <div style="white-space:pre-wrap">@r.Text</div>
+            </div>
+        }
+    }
+
+    <div class="page-header" style="margin-top:1em">
+        <h2>Posts</h2>
+    </div>
+    @if (_posts is null) { <p class="muted">Loading…</p> }
+    else if (_posts.Count == 0) { <div class="empty">No posts yet.</div> }
+    else
+    {
+        <div class="feed">
+            @foreach (var post in _posts) { <PostCard Item="post" /> }
+        </div>
+    }
+
+    <div class="page-header" style="margin-top:1em">
+        <h2>Recent statuses</h2>
+    </div>
+    @if (_statuses is null) { <p class="muted">Loading…</p> }
+    else if (_statuses.Count == 0) { <div class="empty">No statuses.</div> }
+    else
+    {
+        @foreach (var s in _statuses) { <StatusCard Item="s" /> }
+    }
+}
+
+@code {
+    [Parameter] public string Username { get; set; } = "";
+
+    private ArtistProfileDto? _profile;
+    private List<Achievement>? _achievements;
+    private List<Treatment>? _treatments;
+    private List<Review>? _reviews;
+    private List<Post>? _posts;
+    private List<StatusItem>? _statuses;
+    private bool _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _profile = null;
+        _loaded = false;
+        try
+        {
+            _profile = await Profiles.GetArtistAsync(Username);
+            if (_profile is not null)
+            {
+                _achievements = await Profiles.ListAchievementsAsync(_profile.UserId) ?? new();
+                _treatments = await Treatments.ListAsync(artistId: _profile.UserId) ?? new();
+                _reviews = await Reviews.ForArtistAsync(_profile.UserId) ?? new();
+                _posts = await Posts.FeedAsync(authorId: _profile.UserId, take: 20) ?? new();
+                _statuses = await Statuses.ListAsync(author: Username, take: 10) ?? new();
+            }
+        }
+        catch { }
+        finally { _loaded = true; }
+    }
+
+    private async Task StartDmAsync(int otherUserId)
+    {
+        var convo = await DmService.GetOrCreateAsync(otherUserId);
+        if (convo is not null) Nav.NavigateTo($"/messages/{convo.Id}");
+    }
+}

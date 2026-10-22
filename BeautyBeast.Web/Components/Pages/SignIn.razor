@@ -1,0 +1,66 @@
+@page "/signin"
+@layout AuthLayout
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject TokenStore Tokens
+
+<h1 style="margin: 0 0 .8em">Sign in</h1>
+
+<EditForm Model="_model" OnValidSubmit="SubmitAsync">
+    <DataAnnotationsValidator />
+    <div class="field">
+        <label>Username or email</label>
+        <input @bind="_model.UsernameOrEmail" autocomplete="username" />
+    </div>
+    <div class="field">
+        <label>Password</label>
+        <input type="password" @bind="_model.Password" autocomplete="current-password" />
+    </div>
+    <AlertBox Message="@_error" Kind="error" />
+    <button class="btn" type="submit" disabled="@_busy" style="width:100%;justify-content:center">
+        @(_busy ? "Signing in…" : "Sign in")
+    </button>
+</EditForm>
+<hr class="divider" />
+<p class="muted" style="text-align:center">No account yet? <a href="/signup">Sign up</a>.</p>
+<p class="muted" style="text-align:center;font-size:.8em">
+    Demo: <code>ana.beauty</code> (artist) or <code>mia.client</code> (client) · password <code>password123</code>.
+</p>
+
+@code {
+    [SupplyParameterFromQuery(Name = "return")] public string? Return { get; set; }
+
+    private class FormModel
+    {
+        public string UsernameOrEmail { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+    private readonly FormModel _model = new();
+    private string? _error;
+    private bool _busy;
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_model.UsernameOrEmail) || string.IsNullOrWhiteSpace(_model.Password))
+        {
+            _error = "Both fields are required.";
+            return;
+        }
+        try
+        {
+            _busy = true;
+            await Auth.LoginAsync(new LoginRequest(_model.UsernameOrEmail.Trim(), _model.Password));
+            Nav.NavigateTo(string.IsNullOrWhiteSpace(Return) ? "/feed" : Return);
+        }
+        catch (ApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            _error = "Invalid credentials.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+}

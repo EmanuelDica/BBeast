@@ -1,0 +1,57 @@
+@implements IDisposable
+@inject TokenStore Tokens
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<nav>
+    <NavLink href="/feed" Match="NavLinkMatch.All">Feed</NavLink>
+    <NavLink href="/artists">Artists</NavLink>
+    <NavLink href="/treatments">Treatments</NavLink>
+    <NavLink href="/resources">Library</NavLink>
+    <NavLink href="/consent-forms">Consent Forms</NavLink>
+
+    @if (Tokens.IsAuthenticated)
+    {
+        <NavLink href="/messages">Messages</NavLink>
+    }
+
+    @if (Tokens.IsAuthenticated && Tokens.User is not null)
+    {
+        <div class="section">My Account</div>
+        @if (Tokens.User.Role == UserRole.Artist)
+        {
+            <NavLink href="@($"/artists/{Tokens.User.Username}")">My Profile</NavLink>
+            <NavLink href="/me/treatments">My Treatments</NavLink>
+            <NavLink href="/me/schedule">Working Hours</NavLink>
+            <NavLink href="/me/resources">My Resources</NavLink>
+            <NavLink href="/me/consent-forms">My Forms</NavLink>
+        }
+        else
+        {
+            <NavLink href="@($"/clients/{Tokens.User.Username}")">My Profile</NavLink>
+        }
+        <NavLink href="/me/bookings">My Bookings</NavLink>
+        <NavLink href="/me/edit">Edit Profile</NavLink>
+
+        <div style="margin-top:.6em">
+            <button class="btn ghost tiny" @onclick="LogoutAsync">Log out (@Tokens.User.DisplayName)</button>
+        </div>
+    }
+    else
+    {
+        <div class="section">Account</div>
+        <NavLink href="/signin">Sign in</NavLink>
+        <NavLink href="/signup">Sign up</NavLink>
+    }
+</nav>
+
+@code {
+    protected override void OnInitialized() => Tokens.Changed += StateHasChanged;
+    public void Dispose() => Tokens.Changed -= StateHasChanged;
+
+    private async Task LogoutAsync()
+    {
+        await Auth.LogoutAsync();
+        // Redirect is handled by MainLayout.OnTokensChanged → forceLoad: true.
+    }
+}

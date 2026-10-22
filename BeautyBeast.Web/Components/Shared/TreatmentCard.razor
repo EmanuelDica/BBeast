@@ -1,0 +1,29 @@
+<div class="card">
+    @if (!string.IsNullOrWhiteSpace(Item.ImageUrl))
+    {
+        <img class="media-thumb" src="@Item.ImageUrl" alt="@Item.Name" />
+    }
+    <h3>@Item.Name</h3>
+    @if (!string.IsNullOrWhiteSpace(Item.Category)) { <span class="tag">@Item.Category</span> }
+    <span class="tag">@Item.DurationMinutes min</span>
+    <span class="tag brand">@Item.Price.ToString("C")</span>
+    @if (!string.IsNullOrWhiteSpace(Item.Description))
+    {
+        <p class="muted" style="white-space:pre-wrap">@Item.Description</p>
+    }
+    <div class="feed-item-head" style="margin-top:.4em">
+        <Avatar Url="@Item.ArtistAvatarUrl" DisplayName="@Item.ArtistDisplayName" Size="sm" />
+        <div>
+            <div class="name"><a href="/artists/@Item.ArtistUsername">@Item.ArtistDisplayName</a></div>
+            <div class="meta">@Item.ArtistUsername</div>
+        </div>
+    </div>
+    <div class="right">
+        <a class="btn secondary tiny" href="/treatments/@Item.Id">View</a>
+        <a class="btn tiny" href="@($"/book/{Item.Id}")">Book</a>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Treatment Item { get; set; } = default!;
+}

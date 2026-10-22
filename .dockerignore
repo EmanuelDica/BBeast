@@ -1,0 +1,23 @@
+# Version control
+.git
+.gitignore
+
+# Build outputs — Docker builds from source, not local bin/obj
+**/bin/
+**/obj/
+
+# IDE / OS artefacts
+.vs/
+.vscode/
+**/.DS_Store
+**/*.user
+**/*.suo
+
+# Secrets — never bake these into the image
+.env
+**/appsettings.Development.json
+**/user-secrets/
+
+# Docs — not needed at runtime
+*.md
+LICENSE

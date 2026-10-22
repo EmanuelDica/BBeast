@@ -1,0 +1,172 @@
+@page "/me/bookings"
+@inject BookingService Bookings
+@inject ReviewService Reviews
+@inject TokenStore Tokens
+
+<div class="page-header"><h1>My bookings</h1></div>
+
+@if (!Tokens.IsAuthenticated)
+{
+    <div class="empty">Please <a href="/signin">sign in</a> first.</div>
+}
+else if (_list is null)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_list.Count == 0)
+{
+    <div class="empty">No bookings yet. <a href="/treatments">Browse treatments</a>.</div>
+}
+else
+{
+    <p class="muted">Bookings you have placed and bookings made with you.</p>
+    @foreach (var b in _list)
+    {
+        var iAmArtist = Tokens.User?.Id == b.ArtistId;
+        <div class="card">
+            <div class="feed-item-head">
+                @if (iAmArtist)
+                {
+                    <Avatar Url="@b.ClientAvatarUrl" DisplayName="@b.ClientDisplayName" />
+                    <div>
+                        <div class="name">
+                            <span class="tag">Incoming</span>
+                            from <a href="/clients/@b.ClientUsername">@b.ClientDisplayName</a>
+                        </div>
+                        <div class="meta">@@@b.ClientUsername</div>
+                    </div>
+                }
+                else
+                {
+                    <Avatar Url="@b.ArtistAvatarUrl" DisplayName="@b.ArtistDisplayName" />
+                    <div>
+                        <div class="name">
+                            <span class="tag brand">Mine</span>
+                            with <a href="/artists/@b.ArtistUsername">@b.ArtistDisplayName</a>
+                        </div>
+                        <div class="meta">@@@b.ArtistUsername</div>
+                    </div>
+                }
+            </div>
+            <p>
+                <strong>@b.TreatmentName</strong>
+                <span class="tag brand">@b.Price.ToString("C")</span>
+                <span class="tag">@b.DurationMinutes min</span>
+                <span class="tag @StatusClass(b.Status)">@b.Status</span>
+            </p>
+            <p>📅 <strong>@b.ScheduledFor.ToLocalTime().ToString("dddd, d MMM yyyy 'at' HH:mm")</strong></p>
+            @if (!string.IsNullOrWhiteSpace(b.ClientNotes))
+            {
+                <p class="muted"><strong>Client notes:</strong> @b.ClientNotes</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(b.ArtistNotes))
+            {
+                <p class="muted"><strong>Artist notes:</strong> @b.ArtistNotes</p>
+            }
+
+            <div class="right">
+                @* Artist actions on incoming bookings *@
+                @if (iAmArtist && b.Status == BookingStatus.Pending)
+                {
+                    <button class="btn tiny" @onclick="() => SetStatusAsync(b, BookingStatus.Confirmed)">Confirm</button>
+                    <button class="btn ghost tiny" @onclick="() => SetStatusAsync(b, BookingStatus.Declined)">Decline</button>
+                }
+                @if (iAmArtist && b.Status == BookingStatus.Confirmed)
+                {
+                    <button class="btn tiny" @onclick="() => SetStatusAsync(b, BookingStatus.Completed)">Mark completed</button>
+                }
+                @* Client actions on bookings I placed *@
+                @if (!iAmArtist && (b.Status == BookingStatus.Pending || b.Status == BookingStatus.Confirmed))
+                {
+                    <button class="btn danger tiny" @onclick="() => SetStatusAsync(b, BookingStatus.Cancelled)">Cancel</button>
+                }
+                @if (!iAmArtist && b.Status == BookingStatus.Completed && Tokens.User?.Role == UserRole.Client)
+                {
+                    <button class="btn secondary tiny" @onclick="() => OpenReview(b)">Leave a review</button>
+                }
+            </div>
+
+            @if (_reviewBookingId == b.Id)
+            {
+                <hr class="divider" />
+                <h4>Leave a review</h4>
+                <div class="row">
+                    <div class="field">
+                        <label>Rating</label>
+                        <select @bind="_rating">
+                            @for (int i = 5; i >= 1; i--) { <option value="@i">@i ★</option> }
+                        </select>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Your review</label>
+                    <textarea @bind="_reviewText"></textarea>
+                </div>
+                <AlertBox Message="@_reviewError" Kind="error" />
+                <div class="right">
+                    <button class="btn ghost tiny" @onclick="CancelReview">Cancel</button>
+                    <button class="btn tiny" @onclick="() => SubmitReviewAsync(b)" disabled="@_reviewBusy">Submit review</button>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private List<Booking>? _list;
+    private int? _reviewBookingId;
+    private int _rating = 5;
+    private string _reviewText = "";
+    private string? _reviewError;
+    private bool _reviewBusy;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try { _list = await Bookings.MineAsync() ?? new(); }
+        catch { _list = new(); }
+    }
+
+    private async Task SetStatusAsync(Booking b, BookingStatus status)
+    {
+        try
+        {
+            await Bookings.SetStatusAsync(b.Id, new UpdateBookingStatusRequest(status, null));
+            await ReloadAsync();
+        }
+        catch { }
+    }
+
+    private void OpenReview(Booking b)
+    {
+        _reviewBookingId = b.Id;
+        _rating = 5;
+        _reviewText = "";
+        _reviewError = null;
+    }
+
+    private void CancelReview() => _reviewBookingId = null;
+
+    private async Task SubmitReviewAsync(Booking b)
+    {
+        if (string.IsNullOrWhiteSpace(_reviewText)) { _reviewError = "Please write your review."; return; }
+        try
+        {
+            _reviewBusy = true;
+            await Reviews.CreateAsync(new CreateReviewRequest(b.ArtistId, _rating, _reviewText.Trim(), b.Id));
+            _reviewBookingId = null;
+        }
+        catch (Exception ex) { _reviewError = ex.Message; }
+        finally { _reviewBusy = false; }
+    }
+
+    private static string StatusClass(BookingStatus s) => s switch
+    {
+        BookingStatus.Confirmed => "brand",
+        BookingStatus.Completed => "brand",
+        BookingStatus.Cancelled => "",
+        BookingStatus.Declined => "",
+        _ => ""
+    };
+}

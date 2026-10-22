@@ -1,0 +1,163 @@
+@page "/me/schedule"
+@inject ScheduleService Schedule
+@inject TokenStore Tokens
+
+<div class="page-header">
+    <h1>Working hours</h1>
+</div>
+
+@if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist)
+{
+    <div class="empty">Only artists can manage working hours.</div>
+}
+else if (_loading)
+{
+    <p class="muted">Loading…</p>
+}
+else
+{
+    <div class="card" style="max-width:900px">
+        <p class="muted">
+            Set when you accept appointments. Days you leave unchecked are treated as days off.
+            A break is optional — used to split the day so a treatment can't span lunch.
+        </p>
+        @for (int i = 0; i < 7; i++)
+        {
+            var idx = i;
+            var d = _days[idx];
+            <div class="day-row">
+                <div class="day-name">@DayNames[idx]</div>
+                <label style="display:flex;align-items:center;gap:.4em;font-size:.9rem">
+                    <input type="checkbox" @bind="_days[idx].Enabled" />
+                    Working
+                </label>
+                @if (d.Enabled)
+                {
+                    <div>
+                        <label>Start</label>
+                        <input type="time" @bind="_days[idx].Start" />
+                    </div>
+                    <div>
+                        <label>End</label>
+                        <input type="time" @bind="_days[idx].End" />
+                    </div>
+                    <div>
+                        <label>Break start (opt.)</label>
+                        <input type="time" @bind="_days[idx].BreakStart" />
+                    </div>
+                    <div>
+                        <label>Break end (opt.)</label>
+                        <input type="time" @bind="_days[idx].BreakEnd" />
+                    </div>
+                }
+                else
+                {
+                    <div class="day-off">Day off</div>
+                }
+            </div>
+        }
+
+        <AlertBox Message="@_error" Kind="error" />
+        <AlertBox Message="@_ok" Kind="success" />
+        <div class="right">
+            <button class="btn" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Saving…" : "Save")</button>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] DayNames = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+
+    private class DayForm
+    {
+        public bool Enabled { get; set; }
+        public TimeOnly? Start { get; set; } = new(10, 0);
+        public TimeOnly? End { get; set; } = new(17, 0);
+        public TimeOnly? BreakStart { get; set; }
+        public TimeOnly? BreakEnd { get; set; }
+    }
+    private DayForm[] _days = Enumerable.Range(0, 7).Select(_ => new DayForm()).ToArray();
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Tokens.IsAuthenticated || Tokens.User?.Role != UserRole.Artist) { _loading = false; return; }
+        try
+        {
+            var current = await Schedule.GetMineAsync() ?? new();
+            foreach (var w in current)
+            {
+                if (w.Day < 0 || w.Day > 6) continue;
+                _days[w.Day] = new DayForm
+                {
+                    Enabled = true,
+                    Start = ToTime(w.StartMinutes),
+                    End = ToTime(w.EndMinutes),
+                    BreakStart = w.BreakStartMinutes is int bs ? ToTime(bs) : null,
+                    BreakEnd = w.BreakEndMinutes is int be ? ToTime(be) : null,
+                };
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = _ok = null;
+        var rows = new List<WorkingDayDto>();
+        for (int i = 0; i < 7; i++)
+        {
+            var d = _days[i];
+            if (!d.Enabled) continue;
+            if (d.Start is null || d.End is null)
+            {
+                _error = $"Set start and end times on {DayNames[i]}.";
+                return;
+            }
+            var s = ToMinutes(d.Start.Value);
+            var e = ToMinutes(d.End.Value);
+            if (e <= s)
+            {
+                _error = $"End must be after start on {DayNames[i]}.";
+                return;
+            }
+            int? bs = null, be = null;
+            var hasBs = d.BreakStart.HasValue;
+            var hasBe = d.BreakEnd.HasValue;
+            if (hasBs != hasBe)
+            {
+                _error = $"Break on {DayNames[i]} needs both start and end.";
+                return;
+            }
+            if (hasBs && hasBe)
+            {
+                var bsv = ToMinutes(d.BreakStart!.Value);
+                var bev = ToMinutes(d.BreakEnd!.Value);
+                if (bev <= bsv || bsv < s || bev > e)
+                {
+                    _error = $"Break on {DayNames[i]} must sit inside the working hours.";
+                    return;
+                }
+                bs = bsv;
+                be = bev;
+            }
+            rows.Add(new WorkingDayDto(i, s, e, bs, be));
+        }
+
+        try
+        {
+            _busy = true;
+            await Schedule.SetMineAsync(new SetScheduleRequest(rows));
+            _ok = "Schedule saved.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private static TimeOnly ToTime(int min) => new(min / 60, min % 60);
+    private static int ToMinutes(TimeOnly t) => t.Hour * 60 + t.Minute;
+}

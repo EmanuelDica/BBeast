@@ -1,0 +1,29 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.dll
+*.pdb
+
+## Database
+*.db
+*.db-shm
+*.db-wal
+
+## Uploads (keep folder, ignore content)
+BeautyBeast.Api/wwwroot/uploads/*
+!BeautyBeast.Api/wwwroot/uploads/.gitkeep
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Editor
+.vscode/
+.idea/
+
+## Env
+.env
+*.local.json

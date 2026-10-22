@@ -1,0 +1,22 @@
+@* Renders an avatar circle. Falls back to initials when no AvatarUrl is provided. *@
+<span class="avatar @SizeClass" style="@StyleAttr" title="@DisplayName">@Initials</span>
+
+@code {
+    [Parameter] public string? Url { get; set; }
+    [Parameter] public string DisplayName { get; set; } = "";
+    [Parameter] public string Size { get; set; } = ""; // "", "sm", "lg"
+
+    private string SizeClass => string.IsNullOrEmpty(Size) ? "" : Size;
+    private string StyleAttr => string.IsNullOrWhiteSpace(Url) ? "" : $"background-image:url('{Url}')";
+    private string Initials
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(Url)) return "";
+            if (string.IsNullOrWhiteSpace(DisplayName)) return "?";
+            var parts = DisplayName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 1) return parts[0][..1].ToUpperInvariant();
+            return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
+        }
+    }
+}

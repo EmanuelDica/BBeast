@@ -1,0 +1,160 @@
+@inject StatusService Statuses
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<div class="card compact">
+    <div class="feed-item-head">
+        <Avatar Url="@Item.AuthorAvatarUrl" DisplayName="@Item.AuthorDisplayName" Size="sm" />
+        <div>
+            <div class="name">
+                <a href="@AuthorLink">@Item.AuthorDisplayName</a>
+                @if (Item.AuthorRole == UserRole.Artist) { <span class="tag brand">Artist</span> }
+            </div>
+            <div class="meta">@Item.CreatedAt.ToLocalTime().ToString("g")</div>
+        </div>
+    </div>
+
+    <div style="white-space:pre-wrap">@Item.Text</div>
+
+    <div class="feed-actions">
+        <button class="btn @(_liked ? "" : "ghost") tiny" @onclick="ToggleLikeAsync" disabled="@(!Tokens.IsAuthenticated)">
+            @(_liked ? "♥" : "♡") @_likeCount
+        </button>
+        <button class="btn ghost tiny" @onclick="ToggleCommentsAsync">
+            💬 @_commentCount
+        </button>
+        <button class="btn ghost tiny" @onclick="ShareAsync" title="Copy link">
+            ↗ Share
+        </button>
+        @if (Tokens.User?.Id == Item.AuthorId)
+        {
+            <button class="btn danger tiny" @onclick="DeleteAsync">Delete</button>
+        }
+    </div>
+
+    @if (_showComments)
+    {
+        <div class="comments">
+            @if (_comments is null) { <p class="muted">Loading…</p> }
+            else
+            {
+                @foreach (var c in _comments)
+                {
+                    <div class="comment">
+                        <Avatar Url="@c.AuthorAvatarUrl" DisplayName="@c.AuthorDisplayName" Size="sm" />
+                        <div>
+                            <div class="comment-bubble">
+                                <strong>@c.AuthorDisplayName</strong>
+                                <div style="white-space:pre-wrap">@c.Text</div>
+                            </div>
+                            <div class="meta">@c.CreatedAt.ToLocalTime().ToString("g")
+                                @if (Tokens.User?.Id == c.AuthorId)
+                                {
+                                    <button class="btn ghost tiny" @onclick="() => DeleteCommentAsync(c.Id)">Delete</button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                @if (Tokens.IsAuthenticated)
+                {
+                    <div class="row" style="margin-top:.6em">
+                        <textarea @bind="_draft" placeholder="Write a comment…" style="min-height:60px"></textarea>
+                    </div>
+                    <div class="right">
+                        <button class="btn tiny" @onclick="AddCommentAsync" disabled="@(string.IsNullOrWhiteSpace(_draft))">Post comment</button>
+                    </div>
+                }
+                else
+                {
+                    <p class="muted">Sign in to comment.</p>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public StatusItem Item { get; set; } = default!;
+    [Parameter] public EventCallback<int> OnDeleted { get; set; }
+
+    private bool _showComments;
+    private List<StatusComment>? _comments;
+    private string _draft = "";
+    private bool _liked;
+    private int _likeCount;
+    private int _commentCount;
+
+    private string AuthorLink =>
+        Item.AuthorRole == UserRole.Artist
+            ? $"/artists/{Item.AuthorUsername}"
+            : $"/clients/{Item.AuthorUsername}";
+
+    protected override void OnParametersSet()
+    {
+        _liked = Item.LikedByCurrentUser;
+        _likeCount = Item.LikeCount;
+        _commentCount = Item.CommentCount;
+    }
+
+    private async Task ToggleLikeAsync()
+    {
+        if (!Tokens.IsAuthenticated) { Nav.NavigateTo("/signin"); return; }
+        try
+        {
+            if (_liked) { await Statuses.UnlikeAsync(Item.Id); _liked = false; _likeCount--; }
+            else { await Statuses.LikeAsync(Item.Id); _liked = true; _likeCount++; }
+        }
+        catch { }
+    }
+
+    private async Task ToggleCommentsAsync()
+    {
+        _showComments = !_showComments;
+        if (_showComments && _comments is null)
+            _comments = await Statuses.CommentsAsync(Item.Id) ?? new();
+    }
+
+    private async Task AddCommentAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_draft)) return;
+        var c = await Statuses.AddCommentAsync(Item.Id, new CreateStatusCommentRequest(_draft.Trim()));
+        if (c is not null)
+        {
+            _comments ??= new();
+            _comments.Add(c);
+            _draft = "";
+            _commentCount++;
+        }
+    }
+
+    private async Task DeleteCommentAsync(int id)
+    {
+        try
+        {
+            await Statuses.DeleteCommentAsync(id);
+            _comments?.RemoveAll(c => c.Id == id);
+            _commentCount = Math.Max(0, _commentCount - 1);
+        }
+        catch { }
+    }
+
+    private async Task ShareAsync()
+    {
+        var url = Nav.ToAbsoluteUri($"/statuses/{Item.Id}").ToString();
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", url); }
+        catch { }
+    }
+
+    private async Task DeleteAsync()
+    {
+        try
+        {
+            await Statuses.DeleteAsync(Item.Id);
+            await OnDeleted.InvokeAsync(Item.Id);
+        }
+        catch { }
+    }
+}

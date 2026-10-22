@@ -1,0 +1,129 @@
+@page "/compose"
+@page "/compose/{Id:int}"
+@inject PostService Posts
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <h1>@(Id is null ? "New post" : "Edit post")</h1>
+</div>
+
+@if (!Tokens.IsAuthenticated)
+{
+    <div class="empty">Please <a href="/signin">sign in</a> to post.</div>
+}
+else
+{
+    <div class="card" style="max-width:760px">
+        <div class="field">
+            <label>Title (optional, encouraged for articles)</label>
+            <input @bind="_model.Title" />
+        </div>
+        <div class="field">
+            <label>Body</label>
+            <textarea @bind="_model.Body" style="min-height:160px"></textarea>
+        </div>
+        <div class="field">
+            <label>Kind</label>
+            <select @bind="_model.Kind">
+                <option value="@PostKind.Text">Text</option>
+                <option value="@PostKind.Image">Image</option>
+                <option value="@PostKind.Video">Video</option>
+                <option value="@PostKind.Article">Article</option>
+            </select>
+        </div>
+
+        <div class="field">
+            <label>Media</label>
+            @for (int i = 0; i < _mediaUrls.Count; i++)
+            {
+                var idx = i;
+                <div class="row" style="align-items:center; gap:.5em; margin-bottom:.5em">
+                    <div style="flex:1">
+                        <MediaUploader Url="@_mediaUrls[idx]"
+                                       UrlChanged="@(url => UpdateMedia(idx, url))"
+                                       Label="@($"Image / video {idx + 1}")" />
+                    </div>
+                    <button class="btn danger tiny" style="align-self:flex-start; margin-top:1.4em"
+                            @onclick="() => RemoveMedia(idx)">✕</button>
+                </div>
+            }
+            @if (_mediaUrls.Count < 8)
+            {
+                <button class="btn ghost tiny" @onclick="AddMediaSlot">+ Add image / video</button>
+            }
+        </div>
+
+        <AlertBox Message="@_error" Kind="error" />
+        <div class="right">
+            <a class="btn ghost" href="/feed">Cancel</a>
+            <button class="btn" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Saving…" : "Save")</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private class FormModel
+    {
+        public string? Title { get; set; }
+        public string Body { get; set; } = "";
+        public PostKind Kind { get; set; } = PostKind.Text;
+    }
+    private FormModel _model = new();
+    private List<string?> _mediaUrls = new() { null };
+    private string? _error;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id is int id)
+        {
+            try
+            {
+                var p = await Posts.GetAsync(id);
+                if (p is not null)
+                {
+                    _model = new FormModel { Title = p.Title, Body = p.Body, Kind = p.Kind };
+                    _mediaUrls = p.MediaUrls.Any()
+                        ? p.MediaUrls.Select(u => (string?)u).ToList()
+                        : new List<string?> { null };
+                }
+            }
+            catch (Exception ex) { _error = ex.Message; }
+        }
+    }
+
+    private void AddMediaSlot() => _mediaUrls.Add(null);
+
+    private void UpdateMedia(int idx, string? url) => _mediaUrls[idx] = url;
+
+    private void RemoveMedia(int idx)
+    {
+        _mediaUrls.RemoveAt(idx);
+        if (_mediaUrls.Count == 0) _mediaUrls.Add(null);
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_model.Body)) { _error = "Body is required."; return; }
+        try
+        {
+            _busy = true;
+            var urls = _mediaUrls
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Select(u => u!)
+                .ToList();
+            var req = new CreatePostRequest(_model.Title, _model.Body.Trim(), urls, _model.Kind);
+            if (Id is int id)
+                await Posts.UpdateAsync(id, req);
+            else
+                await Posts.CreateAsync(req);
+            Nav.NavigateTo("/feed");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

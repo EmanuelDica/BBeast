@@ -1,0 +1,58 @@
+@page "/treatments/{Id:int}"
+@inject TreatmentService Treatments
+@inject TokenStore Tokens
+
+@if (_t is null && !_loaded) { <p class="muted">Loading…</p> }
+else if (_t is null) { <div class="empty">Treatment not found.</div> }
+else
+{
+    var t = _t;
+    <div class="page-header">
+        <h1>@t.Name</h1>
+    </div>
+    <div class="card">
+        @if (!string.IsNullOrWhiteSpace(t.ImageUrl)) { <img class="media-thumb" src="@t.ImageUrl" alt="@t.Name" /> }
+        @if (!string.IsNullOrWhiteSpace(t.Category)) { <span class="tag">@t.Category</span> }
+        <span class="tag">@t.DurationMinutes min</span>
+        <span class="tag brand">@t.Price.ToString("C")</span>
+        @if (!string.IsNullOrWhiteSpace(t.Description))
+        {
+            <p style="white-space:pre-wrap">@t.Description</p>
+        }
+        <div class="feed-item-head" style="margin-top:.5em">
+            <Avatar Url="@t.ArtistAvatarUrl" DisplayName="@t.ArtistDisplayName" Size="sm" />
+            <div>
+                <div class="name">By <a href="/artists/@t.ArtistUsername">@t.ArtistDisplayName</a></div>
+                <div class="meta">@@@t.ArtistUsername</div>
+            </div>
+        </div>
+        <div class="right">
+            @if (Tokens.IsAuthenticated && Tokens.User?.Id != t.ArtistId)
+            {
+                <a class="btn" href="@($"/book/{t.Id}")">Book this treatment</a>
+            }
+            else if (!Tokens.IsAuthenticated)
+            {
+                <a class="btn secondary" href="/signin">Sign in to book</a>
+            }
+            @if (Tokens.IsAuthenticated && Tokens.User?.Id == t.ArtistId)
+            {
+                <a class="btn secondary" href="@($"/me/treatments/{t.Id}/edit")">Edit</a>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private Treatment? _t;
+    private bool _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _t = null; _loaded = false;
+        try { _t = await Treatments.GetAsync(Id); }
+        catch { }
+        finally { _loaded = true; }
+    }
+}

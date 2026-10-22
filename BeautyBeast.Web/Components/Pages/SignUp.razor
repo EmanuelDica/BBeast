@@ -1,0 +1,87 @@
+@page "/signup"
+@layout AuthLayout
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<h1 style="margin: 0 0 .8em">Create an account</h1>
+
+<EditForm Model="_model" OnValidSubmit="SubmitAsync">
+    <div class="field">
+        <label>I am a…</label>
+        <select @bind="_model.Role">
+            <option value="@UserRole.Client">Client</option>
+            <option value="@UserRole.Artist">Beauty artist / professional</option>
+        </select>
+    </div>
+    <div class="field">
+        <label>Display name</label>
+        <input @bind="_model.DisplayName" />
+    </div>
+    <div class="field">
+        <label>Username</label>
+        <input @bind="_model.Username" />
+        <span class="muted">Letters, numbers, dots. Lowercase recommended.</span>
+    </div>
+    <div class="field">
+        <label>Email</label>
+        <input type="email" @bind="_model.Email" />
+    </div>
+    <div class="field">
+        <label>Password</label>
+        <input type="password" @bind="_model.Password" />
+        <span class="muted">At least 6 characters.</span>
+    </div>
+    <AlertBox Message="@_error" Kind="error" />
+    <button class="btn" type="submit" disabled="@_busy" style="width:100%;justify-content:center">
+        @(_busy ? "Creating…" : "Create account")
+    </button>
+</EditForm>
+<hr class="divider" />
+<p class="muted" style="text-align:center">Already have an account? <a href="/signin">Sign in</a>.</p>
+
+@code {
+    private class FormModel
+    {
+        public string Username { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string Password { get; set; } = "";
+        public UserRole Role { get; set; } = UserRole.Client;
+    }
+    private readonly FormModel _model = new();
+    private string? _error;
+    private bool _busy;
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_model.Username) || string.IsNullOrWhiteSpace(_model.Email)
+            || string.IsNullOrWhiteSpace(_model.DisplayName) || string.IsNullOrWhiteSpace(_model.Password))
+        {
+            _error = "All fields are required.";
+            return;
+        }
+        if (_model.Password.Length < 6)
+        {
+            _error = "Password must be at least 6 characters.";
+            return;
+        }
+        try
+        {
+            _busy = true;
+            await Auth.RegisterAsync(new RegisterRequest(
+                _model.Username.Trim().ToLowerInvariant(),
+                _model.Email.Trim(),
+                _model.DisplayName.Trim(),
+                _model.Password,
+                _model.Role));
+            Nav.NavigateTo("/feed");
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Body.Length > 200 ? "Could not create account." : ex.Body;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

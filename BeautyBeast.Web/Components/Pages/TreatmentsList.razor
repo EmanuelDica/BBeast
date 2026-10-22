@@ -1,0 +1,55 @@
+@page "/treatments"
+@inject TreatmentService Treatments
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <h1>Treatments</h1>
+    <div class="row" style="max-width:520px">
+        <input type="search" placeholder="Search treatments…" @bind="_q" @onkeyup="OnKey" />
+        <select @bind="_category" @bind:after="ReloadAsync">
+            <option value="">All categories</option>
+            @if (_categories is not null)
+            {
+                @foreach (var c in _categories) { <option value="@c">@c</option> }
+            }
+        </select>
+    </div>
+</div>
+
+@if (_treatments is null) { <p class="muted">Loading…</p> }
+else if (_treatments.Count == 0) { <div class="empty">No treatments match your filters.</div> }
+else
+{
+    <div class="list-grid">
+        @foreach (var t in _treatments) { <TreatmentCard Item="t" /> }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery] public int? ArtistId { get; set; }
+
+    private string _q = "";
+    private string _category = "";
+    private List<Treatment>? _treatments;
+    private List<string>? _categories;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _categories = await Treatments.CategoriesAsync() ?? new(); } catch { _categories = new(); }
+        await ReloadAsync();
+    }
+
+    private async Task OnKey(KeyboardEventArgs e) { if (e.Key == "Enter") await ReloadAsync(); }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _treatments = await Treatments.ListAsync(
+                artistId: ArtistId,
+                q: string.IsNullOrWhiteSpace(_q) ? null : _q,
+                category: string.IsNullOrWhiteSpace(_category) ? null : _category) ?? new();
+        }
+        catch { _treatments = new(); }
+    }
+}
